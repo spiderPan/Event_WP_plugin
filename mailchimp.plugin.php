@@ -32,11 +32,22 @@ function mailchimp_event_init() {
 /************* Metabox inspi_event ********************/
 function get_mailchimp_fields() {
 	return array(
+		'segment_id'    => array(
+			'name'     => 'Group',
+			'type'     => 'hidden',
+			'required' => false
+		),
+		'campaign_id'   => array(
+			'name'     => 'campaign',
+			'type'     => 'hidden',
+			'required' => false
+		),
 		'event'         => array(
 			'name'     => 'Event',
 			'type'     => 'text',
 			'required' => true
 		),
+
 		'event_date'    => array(
 			'name'     => 'Event Date',
 			'type'     => 'date',
@@ -65,6 +76,15 @@ function get_mailchimp_fields() {
 	);
 }
 
+function get_campaign_para() {
+	return array(
+		'event'         => '',
+		'email_date'    => '',
+		'email_time'    => '',
+		'email_content' => ''
+	);
+}
+
 add_action('admin_init', 'mailchimp_metabox');
 
 function mailchimp_metabox() {
@@ -72,20 +92,29 @@ function mailchimp_metabox() {
 }
 
 function mailchimp_metabox_callback($post) {
-	wp_nonce_field('inspi_mailchimp_event_meta_box', 'inspi_mailchimp_event_meta_box_nonce');
+	wp_nonce_field(plugin_basename(__FILE__), 'inspi_mailchimp_event_meta_box_nonce');
 
 	$mailchimp_fields = get_mailchimp_fields();
 	?>
 	<dl>
 		<?php
 		foreach ($mailchimp_fields as $key => $info) :?>
-			<dt><label for="inspi-<?php echo $key; ?>"><?php echo $info['name']; ?></label></dt>
-			<?php $value = get_post_meta($post->ID, 'inspi-' . $key, true); ?>
+
+			<?php $value = get_post_meta($post->ID, 'inspi-' . $key, true);
+			if ($info['type'] !== 'hidden'):
+				?>
+				<dt><label for="inspi-<?php echo $key; ?>"><?php echo $info['name']; ?></label></dt>
+			<?php endif; ?>
 			<dd>
 				<?php switch ($info['type']):
 				case 'textarea':
 					?>
 					<textarea id="inspi-<?php echo $key; ?>" name="inspi-<?php echo $key; ?>" rows="5" cols="100" <?php echo $info['required'] ? 'required="required"' : ''; ?>><?php echo $value; ?></textarea>
+				<?php break;
+				case 'hidden':
+				?>
+				<input type="hidden" id="inspi-<?php echo $key; ?>" name="inspi-<?php echo $key; ?>" value="<?php echo $value; ?>" <?php echo $info['required'] ? 'required="required"' : ''; ?> />
+
 				<?php break;
 				case 'text':
 				?>
@@ -128,12 +157,42 @@ function inspi_mailchimp_event_plugin_save_postdata($post_id) {
 		}
 	}
 
-	$fields = get_mailchimp_fields();
+	$fields          = get_mailchimp_fields();
+	$campaign_fields = get_campaign_para();
+
 	foreach ($fields as $fieldId => $info) {
 
 		$value = $_POST['inspi-' . $fieldId];
+		if (array_key_exists($fieldId, $campaign_fields)) {
+			$campaign_fields[$fieldId] = $value;
+		}
 		update_post_meta($post_id, 'inspi-' . $fieldId, $value);
 	}
+
+	/************* Set Up MailChimp ********************/
+
+	include 'lib/IntegrateMailChimp.php';
+
+	$IntergrateMailChimp = new IntegrateMailChimp();
+	//Detect Segment;
+	$segment_id = $_POST['inspi-segment_id'];
+	if (empty($segment_id)) {
+		$segment_id = $IntergrateMailChimp->check_segment($post_id);
+		update_post_meta($post_id, 'inspi-segment_id', $segment_id);
+	}
+
+	//Detect Campaign
+	$campaign_id = $_POST['inspi-campaign_id'];
+	if (empty($campaign_id)) {
+		$campaign_id = $IntergrateMailChimp->create_campaign($segment_id, $campaign_fields);
+		update_post_meta($post_id, 'inspi-campaign_id', $campaign_id);
+	} else {
+		echo var_dump($campaign_fields);
+		exit;
+	}
+
+
+	/************* Set Up MailChimp ********************/
 
 	return "";
 }
